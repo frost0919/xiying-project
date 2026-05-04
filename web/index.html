@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TDOA 小车定位 · 实时坐标</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-deep: #060a12;
+      --bg-panel: rgba(12, 22, 38, 0.72);
+      --border: rgba(0, 245, 212, 0.22);
+      --accent: #00f5d4;
+      --accent-dim: rgba(0, 245, 212, 0.35);
+      --accent-glow: rgba(0, 245, 212, 0.55);
+      --text: #e8f4ff;
+      --text-muted: rgba(180, 210, 230, 0.65);
+      --grid-major: rgba(0, 245, 212, 0.09);
+      --grid-minor: rgba(0, 245, 212, 0.045);
+      --danger: #ff6b9d;
+      --axis-tick: rgba(200, 230, 255, 0.55);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: radial-gradient(ellipse 120% 80% at 50% -20%, #122038 0%, var(--bg-deep) 55%);
+      color: var(--text);
+      font-family: "Noto Sans SC", "JetBrains Mono", system-ui, sans-serif;
+      overflow: hidden;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100%;
+      max-height: 100vh;
+      padding: 1rem 1.25rem 1rem;
+      gap: 0.75rem;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.65rem 1rem;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      backdrop-filter: blur(12px);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+        0 20px 50px rgba(0, 0, 0, 0.35);
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      background: linear-gradient(90deg, var(--text) 0%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .brand span {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-family: "JetBrains Mono", monospace;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .toolbar label {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-family: "JetBrains Mono", monospace;
+    }
+
+    input[type="number"],
+    input[type="text"] {
+      background: rgba(6, 14, 28, 0.85);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--accent);
+      padding: 0.35rem 0.5rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.75rem;
+      width: 5rem;
+    }
+
+    input[type="text"] {
+      width: 12rem;
+    }
+
+    button {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+      padding: 0.45rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--accent-dim);
+      background: linear-gradient(180deg, rgba(0, 245, 212, 0.18), rgba(0, 245, 212, 0.06));
+      color: var(--accent);
+      cursor: pointer;
+      transition: box-shadow 0.2s, border-color 0.2s;
+    }
+
+    button:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 18px var(--accent-glow);
+    }
+
+    button.secondary {
+      border-color: rgba(255, 255, 255, 0.15);
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    main {
+      position: relative;
+      min-height: 0;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(4, 10, 22, 0.55);
+      box-shadow:
+        0 0 0 1px rgba(0, 245, 212, 0.06) inset,
+        0 25px 80px rgba(0, 0, 0, 0.45);
+      overflow: hidden;
+    }
+
+    #canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+    }
+
+    .hud {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      align-items: flex-end;
+      pointer-events: none;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      text-shadow: 0 0 12px rgba(0, 0, 0, 0.8);
+    }
+
+    .hud strong {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    footer {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      font-family: "JetBrains Mono", monospace;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      justify-content: space-between;
+      padding: 0 0.25rem;
+    }
+
+    footer code {
+      color: var(--accent-dim);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">
+        <h1>UWB · TDOA 定位视图</h1>
+        <span>TAG POSITION MONITOR · meters (m)</span>
+      </div>
+      <div class="toolbar">
+        <label>X 范围 <input type="number" id="xMin" value="-2" step="0.5" /> ~ <input type="number" id="xMax" value="12" step="0.5" /></label>
+        <label>Y 范围 <input type="number" id="yMin" value="-2" step="0.5" /> ~ <input type="number" id="yMax" value="12" step="0.5" /></label>
+        <label>轮询 URL <input type="text" id="pollUrl" placeholder="http://127.0.0.1:8765/positions" /></label>
+        <button type="button" id="btnDemo">演示数据</button>
+        <button type="button" id="btnFit" class="secondary">自适应范围</button>
+      </div>
+    </header>
+    <main>
+      <canvas id="canvas" aria-label="坐标平面"></canvas>
+      <div class="hud">
+        <div>FPS <strong id="fps">—</strong></div>
+        <div>TAGS <strong id="tagCount">0</strong></div>
+        <div id="lastUpdate">本地演示</div>
+      </div>
+    </main>
+    <footer>
+      <span>整合流程：终端运行 <code>python scripts/pipeline.py -p COM3 -c config/anchors.json</code>，此处填 <code>http://127.0.0.1:8765/positions</code>；留空为本地演示动画。</span>
+      <span id="mouseWorld"></span>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      const fpsEl = document.getElementById("fps");
+      const tagCountEl = document.getElementById("tagCount");
+      const lastUpdateEl = document.getElementById("lastUpdate");
+      const mouseWorldEl = document.getElementById("mouseWorld");
+      const pollUrlInput = document.getElementById("pollUrl");
+      const xMinInput = document.getElementById("xMin");
+      const xMaxInput = document.getElementById("xMax");
+      const yMinInput = document.getElementById("yMin");
+      const yMaxInput = document.getElementById("yMax");
+
+      /** @type {{ id: string, x: number, y: number, hue?: number }[]} */
+      let vehicles = [];
+      let demoMode = true;
+      let demoT = 0;
+      let pollTimer = null;
+      let lastPollOk = null;
+
+      const CSS = getComputedStyle(document.documentElement);
+      const accent = CSS.getPropertyValue("--accent").trim() || "#00f5d4";
+      const gridMajor = "rgba(0, 245, 212, 0.09)";
+      const gridMinor = "rgba(0, 245, 212, 0.045)";
+      const axisTick = "rgba(200, 230, 255, 0.55)";
+
+      const pad = { left: 52, right: 28, top: 28, bottom: 44 };
+
+      function worldBounds() {
+        return {
+          xmin: parseFloat(xMinInput.value) || 0,
+          xmax: parseFloat(xMaxInput.value) || 10,
+          ymin: parseFloat(yMinInput.value) || 0,
+          ymax: parseFloat(yMaxInput.value) || 10,
+        };
+      }
+
+      function setBounds(xmin, xmax, ymin, ymax) {
+        xMinInput.value = String(xmin);
+        xMaxInput.value = String(xmax);
+        yMinInput.value = String(ymin);
+        yMaxInput.value = String(ymax);
+      }
+
+      function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.floor(rect.width * dpr);
+        canvas.height = Math.floor(rect.height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function worldToScreen(wx, wy, w, h, b) {
+        const iw = b.xmax - b.xmin;
+        const ih = b.ymax - b.ymin;
+        const plotW = w - pad.left - pad.right;
+        const plotH = h - pad.top - pad.bottom;
+        const sx = pad.left + ((wx - b.xmin) / iw) * plotW;
+        const sy = pad.top + plotH - ((wy - b.ymin) / ih) * plotH;
+        return { sx, sy };
+      }
+
+      function screenToWorld(sx, sy, w, h, b) {
+        const iw = b.xmax - b.xmin;
+        const ih = b.ymax - b.ymin;
+        const plotW = w - pad.left - pad.right;
+        const plotH = h - pad.top - pad.bottom;
+        const wx = b.xmin + ((sx - pad.left) / plotW) * iw;
+        const wy = b.ymin + ((pad.top + plotH - sy) / plotH) * ih;
+        return { wx, wy };
+      }
+
+      function drawBackground(w, h) {
+        const g = ctx.createLinearGradient(0, 0, w, h);
+        g.addColorStop(0, "rgba(8, 18, 36, 0.92)");
+        g.addColorStop(1, "rgba(4, 8, 18, 0.98)");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.strokeStyle = "rgba(0, 245, 212, 0.08)";
+        ctx.lineWidth = 1;
+        const step = 24;
+        for (let x = 0; x < w; x += step) {
+          ctx.beginPath();
+          ctx.moveTo(x + 0.5, 0);
+          ctx.lineTo(x + 0.5, h);
+          ctx.stroke();
+        }
+        for (let y = 0; y < h; y += step) {
+          ctx.beginPath();
+          ctx.moveTo(0, y + 0.5);
+          ctx.lineTo(w, y + 0.5);
+          ctx.stroke();
+        }
+      }
+
+      function drawPlotGrid(w, h, b) {
+        const plotW = w - pad.left - pad.right;
+        const plotH = h - pad.top - pad.bottom;
+        const iw = b.xmax - b.xmin;
+        const ih = b.ymax - b.ymin;
+
+        const niceStep = (range, targetTicks) => {
+          const raw = range / targetTicks;
+          const pow10 = Math.pow(10, Math.floor(Math.log10(raw)));
+          const err = raw / pow10;
+          let fac = 1;
+          if (err >= 7.5) fac = 10;
+          else if (err >= 3.5) fac = 5;
+          else if (err >= 1.5) fac = 2;
+          return fac * pow10;
+        };
+
+        const xStep = niceStep(iw, 8);
+        const yStep = niceStep(ih, 6);
+        const x0 = Math.ceil(b.xmin / xStep) * xStep;
+        const y0 = Math.ceil(b.ymin / yStep) * yStep;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(pad.left, pad.top, plotW, plotH);
+        ctx.clip();
+
+        for (let x = x0; x <= b.xmax + 1e-9; x += xStep) {
+          const { sx } = worldToScreen(x, 0, w, h, b);
+          ctx.strokeStyle = Math.abs(x % (xStep * 5)) < 1e-6 ? gridMajor : gridMinor;
+          ctx.beginPath();
+          ctx.moveTo(sx, pad.top);
+          ctx.lineTo(sx, pad.top + plotH);
+          ctx.stroke();
+        }
+        for (let y = y0; y <= b.ymax + 1e-9; y += yStep) {
+          const { sy } = worldToScreen(0, y, w, h, b);
+          ctx.strokeStyle = Math.abs(y % (yStep * 5)) < 1e-6 ? gridMajor : gridMinor;
+          ctx.beginPath();
+          ctx.moveTo(pad.left, sy);
+          ctx.lineTo(pad.left + plotW, sy);
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 1.5;
+        ctx.shadowColor = "rgba(0, 245, 212, 0.45)";
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top + plotH);
+        ctx.lineTo(pad.left + plotW, pad.top + plotH);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top);
+        ctx.lineTo(pad.left, pad.top + plotH);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = axisTick;
+        ctx.font = '600 11px "JetBrains Mono", monospace';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        for (let x = x0; x <= b.xmax + 1e-9; x += xStep) {
+          const { sx } = worldToScreen(x, 0, w, h, b);
+          if (sx < pad.left - 2 || sx > pad.left + plotW + 2) continue;
+          ctx.fillText(formatTick(x), sx, pad.top + plotH + 6);
+        }
+
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        for (let y = y0; y <= b.ymax + 1e-9; y += yStep) {
+          const { sy } = worldToScreen(0, y, w, h, b);
+          if (sy < pad.top - 2 || sy > pad.top + plotH + 2) continue;
+          ctx.fillText(formatTick(y), pad.left - 8, sy);
+        }
+
+        ctx.fillStyle = accent;
+        ctx.font = '600 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText("x / m", pad.left + plotW / 2, h - 10);
+        ctx.save();
+        ctx.translate(16, pad.top + plotH / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = "center";
+        ctx.fillText("y / m", 0, 0);
+        ctx.restore();
+      }
+
+      function formatTick(v) {
+        const a = Math.abs(v);
+        const d = a >= 100 ? 0 : a >= 10 ? 1 : 2;
+        return Number(v.toFixed(d)).toString();
+      }
+
+      function drawVehicles(w, h, b) {
+        vehicles.forEach((v, i) => {
+          const { sx, sy } = worldToScreen(v.x, v.y, w, h, b);
+          if (sx < pad.left - 20 || sx > w - pad.right + 20 || sy < pad.top - 20 || sy > h - pad.bottom + 20) return;
+
+          const hue = v.hue != null ? v.hue : 160 + (i * 47) % 120;
+          const core = `hsl(${hue}, 95%, 58%)`;
+          const glow = `hsla(${hue}, 100%, 55%, 0.45)`;
+
+          const r = 7;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(sx, sy, r + 14, 0, Math.PI * 2);
+          const rg = ctx.createRadialGradient(sx, sy, r * 0.2, sx, sy, r + 14);
+          rg.addColorStop(0, glow);
+          rg.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.fillStyle = rg;
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.arc(sx, sy, r, 0, Math.PI * 2);
+          ctx.fillStyle = core;
+          ctx.shadowColor = glow;
+          ctx.shadowBlur = 18;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+
+          ctx.strokeStyle = "rgba(255,255,255,0.85)";
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+
+          ctx.fillStyle = "rgba(6, 12, 24, 0.92)";
+          ctx.font = '600 11px "JetBrains Mono", monospace';
+          ctx.textAlign = "left";
+          ctx.textBaseline = "bottom";
+          const label = v.id || `TAG-${i + 1}`;
+          const tx = sx + r + 6;
+          const ty = sy - r - 4;
+          ctx.fillText(label, tx, ty);
+          ctx.fillStyle = axisTick;
+          ctx.font = '10px "JetBrains Mono", monospace';
+          ctx.fillText(`(${v.x.toFixed(2)}, ${v.y.toFixed(2)})`, tx, ty + 12);
+          ctx.restore();
+        });
+      }
+
+      function demoStep(dt) {
+        demoT += dt * 0.001;
+        const cx = 5 + Math.cos(demoT * 0.7) * 3;
+        const cy = 5 + Math.sin(demoT * 0.55) * 2.8;
+        vehicles = [
+          { id: "小车-1", x: cx, y: cy, hue: 165 },
+          { id: "小车-2", x: 3 + Math.sin(demoT * 1.1) * 2, y: 8 + Math.cos(demoT * 0.9) * 1.5, hue: 200 },
+          { id: "小车-3", x: 9 + Math.cos(demoT * 0.4) * 1.2, y: 3 + Math.sin(demoT * 0.8) * 2, hue: 125 },
+        ];
+      }
+
+      function parsePayload(json) {
+        if (Array.isArray(json)) return json;
+        if (json && Array.isArray(json.vehicles)) return json.vehicles;
+        if (json && Array.isArray(json.tags)) return json.tags;
+        if (json && typeof json.x === "number" && typeof json.y === "number") return [json];
+        return [];
+      }
+
+      function normalizeItem(raw, i) {
+        const id = raw.id != null ? String(raw.id) : raw.name != null ? String(raw.name) : `TAG-${i + 1}`;
+        const x = Number(raw.x);
+        const y = Number(raw.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        const o = { id, x, y };
+        if (raw.hue != null && Number.isFinite(Number(raw.hue))) o.hue = Number(raw.hue);
+        return o;
+      }
+
+      async function pollOnce() {
+        const url = pollUrlInput.value.trim();
+        if (!url) return;
+        try {
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) throw new Error(String(res.status));
+          const data = await res.json();
+          const list = parsePayload(data)
+            .map(normalizeItem)
+            .filter(Boolean);
+          vehicles = list;
+          lastPollOk = Date.now();
+          let msg = `已更新 · ${new Date().toLocaleTimeString()}`;
+          if (data && data.last_error) msg += ` · ${data.last_error}`;
+          if (!list.length && data && !data.last_error) msg = "已连接 · 等待首帧定位";
+          lastUpdateEl.textContent = msg;
+        } catch (e) {
+          lastUpdateEl.textContent = `拉取失败 · ${e.message}`;
+        }
+      }
+
+      function startPolling() {
+        stopPolling();
+        const url = pollUrlInput.value.trim();
+        if (!url) return;
+        pollTimer = setInterval(pollOnce, 400);
+        pollOnce();
+      }
+
+      function stopPolling() {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      function fitBounds() {
+        if (!vehicles.length) return;
+        let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+        vehicles.forEach((v) => {
+          xmin = Math.min(xmin, v.x);
+          xmax = Math.max(xmax, v.x);
+          ymin = Math.min(ymin, v.y);
+          ymax = Math.max(ymax, v.y);
+        });
+        const mx = Math.max((xmax - xmin) * 0.12, 0.5);
+        const my = Math.max((ymax - ymin) * 0.12, 0.5);
+        setBounds(xmin - mx, xmax + mx, ymin - my, ymax + my);
+      }
+
+      let lastFrame = performance.now();
+      let fpsAcc = 0;
+      let fpsCount = 0;
+      let fpsShow = 0;
+
+      function frame(now) {
+        const dt = now - lastFrame;
+        lastFrame = now;
+        fpsAcc += dt;
+        fpsCount += 1;
+        if (fpsAcc >= 500) {
+          fpsShow = Math.round((fpsCount * 1000) / fpsAcc);
+          fpsAcc = 0;
+          fpsCount = 0;
+          fpsEl.textContent = String(fpsShow);
+        }
+
+        if (demoMode) demoStep(dt);
+
+        const rect = canvas.getBoundingClientRect();
+        const w = rect.width;
+        const h = rect.height;
+        const b = worldBounds();
+
+        drawBackground(w, h);
+        drawPlotGrid(w, h, b);
+        drawVehicles(w, h, b);
+
+        tagCountEl.textContent = String(vehicles.length);
+        requestAnimationFrame(frame);
+      }
+
+      pollUrlInput.addEventListener("change", () => {
+        demoMode = !pollUrlInput.value.trim();
+        if (demoMode) {
+          stopPolling();
+          lastUpdateEl.textContent = "本地演示";
+        } else {
+          startPolling();
+        }
+      });
+
+      document.getElementById("btnDemo").addEventListener("click", () => {
+        pollUrlInput.value = "";
+        demoMode = true;
+        stopPolling();
+        lastUpdateEl.textContent = "本地演示";
+      });
+
+      document.getElementById("btnFit").addEventListener("click", fitBounds);
+
+      ["xMin", "xMax", "yMin", "yMax"].forEach((id) => {
+        document.getElementById(id).addEventListener("change", () => {});
+      });
+
+      canvas.addEventListener("mousemove", (ev) => {
+        const rect = canvas.getBoundingClientRect();
+        const sx = ev.clientX - rect.left;
+        const sy = ev.clientY - rect.top;
+        const b = worldBounds();
+        const { wx, wy } = screenToWorld(sx, sy, rect.width, rect.height, b);
+        mouseWorldEl.textContent = `指针 ≈ (${wx.toFixed(2)}, ${wy.toFixed(2)}) m`;
+      });
+      canvas.addEventListener("mouseleave", () => {
+        mouseWorldEl.textContent = "";
+      });
+
+      window.addEventListener("resize", resize);
+      resize();
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
