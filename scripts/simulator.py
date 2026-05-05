@@ -1,62 +1,94 @@
+# INSERT_YOUR_CODE
+
 import numpy as np
 import matplotlib.pyplot as plt
-
 from solver import tdoa_chan
+import matplotlib
+
+def simulate_uwb_tdoa(
+    anchors,
+    true_pos,
+    speed_of_light=299_792_458.0,
+    nsigma=1e-9,
+    n_trials=200
+):
+    """
+    anchors: ndarray shape (3,2)
+    true_pos: [x, y]
+    speed_of_light: 光速 (m/s)
+    nsigma: 时间噪声标准差 (秒)
+    n_trials: 模拟次数
+    """
+    anchors = np.asarray(anchors)
+    true_pos = np.asarray(true_pos)
+    results = []
+
+    for i in range(n_trials):
+        # 1. 真实距离
+        dists = np.linalg.norm(anchors - true_pos, axis=1)  # size 3
+
+        # 2. 理论TOA
+        toas = dists / speed_of_light  # 单位：秒
+
+        # 3. 严格模拟TDOA (每个基站分别独立加噪声)
+        noise = np.random.normal(0, nsigma, size=3)
+        noisy_toas = toas + noise
+
+        # 4. 基站间时间差 (以0号为参考)
+        ref_toa = noisy_toas[0]
+        t21 = noisy_toas[1] - ref_toa
+        t31 = noisy_toas[2] - ref_toa
+        time_diffs = np.array([t21, t31])
+
+        # 5. Chan算法解算
+        try:
+            est_pos = tdoa_chan(anchors, time_diffs, speed_of_light)
+            err = np.linalg.norm(est_pos - true_pos)
+            results.append((est_pos, err))
+        except Exception as e:
+            print(f"Chan算法异常: {e}")
+            continue
+
+    est_positions = np.array([pos for pos, _ in results])
+    errors = np.array([err for _, err in results])
+
+    return est_positions, errors
+
+if __name__ == "__main__":
+    np.random.seed(42)
+    # 1. 固定参数
+    ANCHORS = np.array([[0,0], [10,0], [0,10]])
+    TRUE_POS = np.array([5, 5])
+
+    est_positions, errors = simulate_uwb_tdoa(
+        ANCHORS,
+        TRUE_POS,
+        nsigma=1e-9,
+        n_trials=200
+    )
+
+    print("平均定位误差(米): {:.4f}".format(errors.mean()))
+    print("最大定位误差(米): {:.4f}".format(errors.max()))
+    print("≤1米精度的比例: {:.1f}%".format(np.mean(errors < 1.0)*100))
 
 
-    # 只用三个基站的仿真
-def main_three_anchors():
-    # 固定三个基站坐标
-    anchors = np.array([
-        [0., 0.],
-        [10., 0.],
-        [0., 10.]
-    ])
-    # 随机生成标签的真实坐标
-    np.random.seed(42)  # 保证可重复
-    real_pos = np.random.uniform(low=0, high=10, size=2)
-    print(f"随机生成标签的真实坐标: {real_pos}")
+    # 设置中文字体为黑体（防止出现乱码或方框）
+    matplotlib.rcParams['font.sans-serif'] = ['SimHei']  # 也可以试 '微软雅黑' 等
+    matplotlib.rcParams['axes.unicode_minus'] = False    # 正常显示负号
 
-    # 计算标签到各基站的真实距离
-    dists = np.linalg.norm(anchors - real_pos, axis=1)
-
-    # 理想无噪声到达时间戳
-    c = 299_792_458  # 光速，米/秒
-    time_stamps = dists / c
-
-    # 加入5ns高斯噪声
-    noise_ns = np.random.normal(loc=0.0, scale=5, size=anchors.shape[0])
-    noise_s = noise_ns * 1e-9
-    noisy_time_stamps = time_stamps + noise_s
-
-    # 以第一个基站为参考
-    ref_time = noisy_time_stamps[0]
-    time_diffs = noisy_time_stamps[1:] - ref_time
-
-    # 调用Chan算法
-    calc_pos = tdoa_chan(anchors, time_diffs, speed_of_light=c)
-
-    # 定位误差
-    error = np.linalg.norm(calc_pos - real_pos)
-
-    print(f"[三基站仿真] 真实坐标:  ({real_pos[0]:.4f}, {real_pos[1]:.4f})")
-    print(f"[三基站仿真] 计算坐标: ({calc_pos[0]:.4f}, {calc_pos[1]:.4f})")
-    print(f"[三基站仿真] 定位误差: {error:.4f} 米")
-
-    # 绘图
-    plt.figure(figsize=(6, 6))
-    plt.scatter(anchors[:, 0], anchors[:, 1], c='b', marker='s', s=100, label="基站")
-    plt.scatter(real_pos[0], real_pos[1], c='g', marker='o', s=100, label="真实标签")
-    plt.scatter(calc_pos[0], calc_pos[1], c='r', marker='x', s=100, label="计算标签")
-    for i, (ax, ay) in enumerate(anchors):
-        plt.text(ax, ay-0.4, f"A{i+1}", ha='center', va='top', fontsize=10, color='b')
+    plt.figure(figsize=(6,6))
+    plt.scatter(est_positions[:,0], est_positions[:,1], c='dodgerblue', alpha=0.7, label='Chan定位结果')
+    plt.scatter([TRUE_POS[0]], [TRUE_POS[1]], c='red', marker='*', s=200, label='真实位置')
+    plt.scatter(ANCHORS[:,0], ANCHORS[:,1], c='black', marker='^', s=80, label='基站')
+    plt.xlabel("X (m)")
+    plt.ylabel("Y (m)")
+    plt.title("3基站TDOA-UWB定位仿真 (Chan算法)")
     plt.legend()
-    plt.title("TDOA Chan算法定位-三基站仿真")
-    plt.xlim(-1, 11)
-    plt.ylim(-1, 11)
     plt.grid(True)
-    plt.gca().set_aspect('equal', adjustable='box')
+    # 显示误差圈
+    for pos in est_positions:
+        plt.plot([TRUE_POS[0], pos[0]], [TRUE_POS[1], pos[1]], color='gray', alpha=0.1)
+    plt.xlim(-2, 12)
+    plt.ylim(-2, 12)
+    plt.tight_layout()
     plt.show()
-
-# 运行三基站仿真
-main_three_anchors()

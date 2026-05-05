@@ -12,3 +12,4 @@
 每条数据为一行文本，以换行符 \n 结尾，格式如下：
 
 anchor_id:timestamp_value\n
+ 
